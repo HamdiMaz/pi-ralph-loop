@@ -57,7 +57,7 @@ test("/loop command sends the first prompt through Pi", async () => {
 	await command.handler("ship it", {
 		isIdle: () => true,
 		waitForIdle: async () => {},
-		sessionManager: { getEntries: () => [] },
+		sessionManager: { getLeafId: () => null, getEntries: () => [] },
 		navigateTree: async () => ({ cancelled: false }),
 		ui: {
 			notify: () => {},

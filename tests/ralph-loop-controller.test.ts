@@ -7,22 +7,26 @@ type TestEntry = {
 	type: string;
 	id: string;
 	parentId: string | null;
-	message: {
+	message?: {
 		role: string;
 		content: Array<{ type: string; text: string }>;
 	};
 };
 
-function rootUserEntry(id: string, text = "root prompt"): TestEntry {
+function userEntry(id: string, parentId: string | null, text = "root prompt"): TestEntry {
 	return {
 		type: "message",
 		id,
-		parentId: null,
+		parentId,
 		message: {
 			role: "user",
 			content: [{ type: "text", text }],
 		},
 	};
+}
+
+function rootUserEntry(id: string, text = "root prompt"): TestEntry {
+	return userEntry(id, null, text);
 }
 
 function assistantEntry(id: string, parentId: string): TestEntry {
@@ -37,8 +41,17 @@ function assistantEntry(id: string, parentId: string): TestEntry {
 	};
 }
 
-function createContext(entries: TestEntry[] = [rootUserEntry("root")]) {
+function modelChangeEntry(id: string): TestEntry {
+	return {
+		type: "model_change",
+		id,
+		parentId: null,
+	};
+}
+
+function createContext(entries: TestEntry[] = [rootUserEntry("root")], initialLeafId?: string | null) {
 	let idle = true;
+	let leafId = initialLeafId ?? entries.at(-1)?.id ?? null;
 	const actions: string[] = [];
 	const ctx = {
 		actions,
@@ -52,12 +65,16 @@ function createContext(entries: TestEntry[] = [rootUserEntry("root")]) {
 			actions.push("waitForIdle");
 		},
 		sessionManager: {
+			getLeafId() {
+				return leafId;
+			},
 			getEntries() {
 				return entries;
 			},
 		},
 		async navigateTree(targetId: string, options: { summarize?: boolean }) {
 			actions.push(`navigate:${targetId}:summarize=${String(options.summarize)}`);
+			leafId = targetId;
 			return { cancelled: false };
 		},
 		ui: {
@@ -126,7 +143,7 @@ test("/loop without a prompt refuses to start when inactive", async () => {
 
 test("calling /loop while active requests a graceful stop and does not queue another prompt", async () => {
 	const { controller, sentPrompts, scheduled } = createHarness();
-	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")]);
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
 
 	await controller.handleCommand("keep going", ctx);
 	ctx.setIdle(false);
@@ -147,7 +164,7 @@ test("calling /loop while active requests a graceful stop and does not queue ano
 
 test("agent_end resets active context with tree navigation before sending the next iteration", async () => {
 	const { controller, sentPrompts, scheduled } = createHarness();
-	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")]);
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
 
 	await controller.handleCommand("repeat me", ctx);
 	controller.handleAgentEnd();
@@ -163,7 +180,7 @@ test("agent_end resets active context with tree navigation before sending the ne
 
 test("the iteration cap stops the loop after the configured number of total runs", async () => {
 	const { controller, sentPrompts, scheduled } = createHarness(2);
-	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")]);
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
 
 	await controller.handleCommand("bounded", ctx);
 	controller.handleAgentEnd();
@@ -176,9 +193,29 @@ test("the iteration cap stops the loop after the configured number of total runs
 	assert.ok(ctx.actions.includes("notify:info:Ralph Loop reached the 2-iteration cap."));
 });
 
-test("the loop stops with an error if no root user entry exists for context reset", async () => {
+test("agent_end resets to the loop start checkpoint when the session starts with non-user entries", async () => {
 	const { controller, sentPrompts, scheduled } = createHarness();
-	const ctx = createContext([]);
+	const ctx = createContext(
+		[modelChangeEntry("model"), userEntry("loop-user", "model", "repeat from model"), assistantEntry("assistant", "loop-user")],
+		"model",
+	);
+	ctx.actions.length = 0;
+
+	await controller.handleCommand("repeat from model", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["repeat from model", "repeat from model"]);
+	assert.deepEqual(
+		ctx.actions.filter((action) => action.startsWith("navigate:") || action.startsWith("editor:")),
+		["navigate:model:summarize=false", "editor:"],
+	);
+	assert.equal(controller.getState().iterationsStarted, 2);
+});
+
+test("the loop stops with an error if an empty-session reset cannot find the first loop prompt", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([], null);
 
 	await controller.handleCommand("cannot reset", ctx);
 	controller.handleAgentEnd();
@@ -186,5 +223,5 @@ test("the loop stops with an error if no root user entry exists for context rese
 
 	assert.deepEqual(sentPrompts, ["cannot reset"]);
 	assert.equal(controller.getState().active, false);
-	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not find a root user message to reset context."));
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not find the first loop prompt to reset context."));
 });

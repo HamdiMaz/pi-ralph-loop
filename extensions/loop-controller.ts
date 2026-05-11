@@ -13,10 +13,15 @@ type LoopEntry = {
 	};
 };
 
+type ResetTarget =
+	| { kind: "entry"; id: string }
+	| { kind: "firstLoopPrompt"; prompt: string };
+
 export type LoopCommandContextLike = {
 	isIdle(): boolean;
 	waitForIdle(): Promise<void>;
 	sessionManager: {
+		getLeafId(): string | null;
 		getEntries(): LoopEntry[];
 	};
 	navigateTree(targetId: string, options: { summarize: boolean }): Promise<{ cancelled: boolean }>;
@@ -41,12 +46,21 @@ export type RalphLoopState = {
 	stopRequested: boolean;
 };
 
-function isRootUserEntry(entry: LoopEntry): boolean {
-	return entry.type === "message" && entry.parentId === null && entry.message?.role === "user";
+function isUserEntry(entry: LoopEntry): boolean {
+	return entry.type === "message" && entry.message?.role === "user";
 }
 
-function findRootUserEntry(entries: LoopEntry[]): LoopEntry | undefined {
-	return entries.find(isRootUserEntry);
+function contentToText(content: NonNullable<LoopEntry["message"]>["content"] | undefined): string {
+	if (typeof content === "string") {
+		return content;
+	}
+	if (!Array.isArray(content)) {
+		return "";
+	}
+	return content
+		.filter((part) => part.type === "text")
+		.map((part) => part.text ?? "")
+		.join("");
 }
 
 export class RalphLoopController {
@@ -55,6 +69,8 @@ export class RalphLoopController {
 	private readonly schedule: (task: () => Promise<void> | void) => void;
 	private context: LoopCommandContextLike | undefined;
 	private continuationScheduled = false;
+	private resetTarget: ResetTarget | undefined;
+	private entryIdsAtStart = new Set<string>();
 	private state: RalphLoopState;
 
 	constructor(options: RalphLoopControllerOptions) {
@@ -90,6 +106,11 @@ export class RalphLoopController {
 			ctx.ui.notify("Ralph Loop can only start while the agent is idle.", "warning");
 			return;
 		}
+
+		const entriesAtStart = ctx.sessionManager.getEntries();
+		this.entryIdsAtStart = new Set(entriesAtStart.map((entry) => entry.id));
+		const startLeafId = ctx.sessionManager.getLeafId();
+		this.resetTarget = startLeafId ? { kind: "entry", id: startLeafId } : { kind: "firstLoopPrompt", prompt };
 
 		this.state = {
 			active: true,
@@ -145,13 +166,12 @@ export class RalphLoopController {
 	}
 
 	private async resetActiveContext(ctx: LoopCommandContextLike): Promise<boolean> {
-		const rootUserEntry = findRootUserEntry(ctx.sessionManager.getEntries());
-		if (!rootUserEntry) {
-			this.stop("Ralph Loop stopped: could not find a root user message to reset context.", "error");
+		const resetTargetId = this.resolveResetTargetId(ctx);
+		if (!resetTargetId) {
 			return false;
 		}
 
-		const result = await ctx.navigateTree(rootUserEntry.id, { summarize: false });
+		const result = await ctx.navigateTree(resetTargetId, { summarize: false });
 		if (result.cancelled) {
 			this.stop("Ralph Loop stopped: context reset was cancelled.", "warning");
 			return false;
@@ -159,6 +179,35 @@ export class RalphLoopController {
 
 		ctx.ui.setEditorText("");
 		return true;
+	}
+
+	private resolveResetTargetId(ctx: LoopCommandContextLike): string | undefined {
+		const entries = ctx.sessionManager.getEntries();
+		const resetTarget = this.resetTarget;
+		if (!resetTarget) {
+			this.stop("Ralph Loop stopped: could not find the loop start checkpoint.", "error");
+			return undefined;
+		}
+
+		if (resetTarget.kind === "entry") {
+			if (entries.some((entry) => entry.id === resetTarget.id)) {
+				return resetTarget.id;
+			}
+			this.stop("Ralph Loop stopped: could not find the loop start checkpoint.", "error");
+			return undefined;
+		}
+
+		const firstLoopPrompt = entries.find(
+			(entry) =>
+				!this.entryIdsAtStart.has(entry.id) &&
+				isUserEntry(entry) &&
+				contentToText(entry.message?.content).trim() === resetTarget.prompt,
+		);
+		if (!firstLoopPrompt) {
+			this.stop("Ralph Loop stopped: could not find the first loop prompt to reset context.", "error");
+			return undefined;
+		}
+		return firstLoopPrompt.id;
 	}
 
 	private startNextIteration(ctx: LoopCommandContextLike): void {
@@ -175,6 +224,8 @@ export class RalphLoopController {
 		const ctx = this.context;
 		this.state = this.createInactiveState();
 		this.continuationScheduled = false;
+		this.resetTarget = undefined;
+		this.entryIdsAtStart = new Set<string>();
 		if (ctx) {
 			ctx.ui.setStatus(STATUS_KEY, undefined);
 			if (message) {
