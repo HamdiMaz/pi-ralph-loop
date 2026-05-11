@@ -1,9 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { RalphLoopController } from "../extensions/ralph-loop/loop-controller.ts";
+import { RalphLoopController } from "../extensions/loop-controller.ts";
 
-function rootUserEntry(id: string, text = "root prompt") {
+type TestEntry = {
+	type: string;
+	id: string;
+	parentId: string | null;
+	message: {
+		role: string;
+		content: Array<{ type: string; text: string }>;
+	};
+};
+
+function rootUserEntry(id: string, text = "root prompt"): TestEntry {
 	return {
 		type: "message",
 		id,
@@ -15,7 +25,7 @@ function rootUserEntry(id: string, text = "root prompt") {
 	};
 }
 
-function assistantEntry(id: string, parentId: string) {
+function assistantEntry(id: string, parentId: string): TestEntry {
 	return {
 		type: "message",
 		id,
@@ -27,7 +37,7 @@ function assistantEntry(id: string, parentId: string) {
 	};
 }
 
-function createContext(entries = [rootUserEntry("root")]) {
+function createContext(entries: TestEntry[] = [rootUserEntry("root")]) {
 	let idle = true;
 	const actions: string[] = [];
 	const ctx = {

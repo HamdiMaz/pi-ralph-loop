@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import registerRalphLoop from "../extensions/ralph-loop/index.ts";
+import registerRalphLoop from "../extensions/index.ts";
 
 type RegisteredCommand = {
 	description?: string;
