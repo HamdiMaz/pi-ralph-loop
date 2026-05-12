@@ -281,3 +281,21 @@ test("the loop stops with an error if an empty-session reset cannot find the fir
 	assert.equal(controller.getState().active, false);
 	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not find the first loop prompt to reset context."));
 });
+
+test("the loop stops and notifies when context reset throws", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+	ctx.navigateTree = async (targetId: string) => {
+		ctx.actions.push(`navigate:${targetId}:throw`);
+		throw new Error("tree unavailable");
+	};
+
+	await controller.handleCommand("recover cleanly", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["recover cleanly"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: context reset failed: tree unavailable"));
+});

@@ -65,6 +65,13 @@ function contentToText(content: NonNullable<LoopEntry["message"]>["content"] | u
 		.join("");
 }
 
+function errorToMessage(error: unknown): string {
+	if (error instanceof Error && error.message) {
+		return error.message;
+	}
+	return String(error);
+}
+
 export class RalphLoopController {
 	private readonly maxIterations: number;
 	private readonly createResetCheckpoint: RalphLoopControllerOptions["createResetCheckpoint"];
@@ -180,7 +187,14 @@ export class RalphLoopController {
 			return false;
 		}
 
-		const result = await ctx.navigateTree(resetTargetId, { summarize: false });
+		let result: { cancelled: boolean };
+		try {
+			result = await ctx.navigateTree(resetTargetId, { summarize: false });
+		} catch (error) {
+			this.stop(`Ralph Loop stopped: context reset failed: ${errorToMessage(error)}`, "error");
+			return false;
+		}
+
 		if (result.cancelled) {
 			this.stop("Ralph Loop stopped: context reset was cancelled.", "warning");
 			return false;
