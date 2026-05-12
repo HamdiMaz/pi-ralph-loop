@@ -9,6 +9,7 @@ Ralph Loop is a [Pi](https://pi.dev) extension that repeats a prompt from a clea
 - Creates a hidden session checkpoint before the first iteration.
 - After each agent run, navigates back to that checkpoint with `summarize: false`, clears the editor, and sends the prompt again.
 - Calling `/loop` while a loop is active requests a graceful stop after the current run finishes.
+- Refuses to start, or stops before the next reset, if Pi has queued messages that would otherwise race the loop.
 - Stops automatically on session shutdown.
 
 ## Install
@@ -46,6 +47,7 @@ To stop an active loop, run `/loop` again. The extension will finish the current
 - The 10-iteration cap is intentional to prevent accidental infinite loops.
 - Each loop stores a `ralph-loop-checkpoint` custom session entry. Custom entries do not participate in LLM context, but they give the extension an exact tree navigation target.
 - Ralph Loop uses Pi session tree navigation, so previous attempts remain available in session history even though the active context is reset between iterations.
+- If checkpoint creation, scheduling, idle waiting, prompt sending, or context reset fails, Ralph Loop clears its status and reports the failure instead of leaving a stale active loop.
 
 ## Development
 

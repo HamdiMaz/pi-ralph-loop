@@ -20,6 +20,7 @@ type ResetTarget =
 
 export type LoopCommandContextLike = {
 	isIdle(): boolean;
+	hasPendingMessages(): boolean;
 	waitForIdle(): Promise<void>;
 	sessionManager: {
 		getLeafId(): string | null;
@@ -118,10 +119,21 @@ export class RalphLoopController {
 			return;
 		}
 
+		if (ctx.hasPendingMessages()) {
+			ctx.ui.notify("Ralph Loop can only start when no messages are queued.", "warning");
+			return;
+		}
+
 		const entriesAtStart = ctx.sessionManager.getEntries();
 		this.entryIdsAtStart = new Set(entriesAtStart.map((entry) => entry.id));
 		const startLeafId = ctx.sessionManager.getLeafId();
-		const checkpointId = this.createResetCheckpoint?.(ctx, prompt);
+		let checkpointId: string | undefined;
+		try {
+			checkpointId = this.createResetCheckpoint?.(ctx, prompt);
+		} catch (error) {
+			this.stop(`Ralph Loop could not start: reset checkpoint failed: ${errorToMessage(error)}`, "error");
+			return;
+		}
 		this.resetTarget = checkpointId
 			? { kind: "entry", id: checkpointId }
 			: startLeafId
@@ -144,14 +156,18 @@ export class RalphLoopController {
 		}
 
 		this.continuationScheduled = true;
-		this.schedule(async () => {
-			this.continuationScheduled = false;
-			try {
-				await this.continueAfterAgentEnd();
-			} catch (error) {
-				this.stop(`Ralph Loop stopped: continuation failed: ${errorToMessage(error)}`, "error");
-			}
-		});
+		try {
+			this.schedule(async () => {
+				this.continuationScheduled = false;
+				try {
+					await this.continueAfterAgentEnd();
+				} catch (error) {
+					this.stop(`Ralph Loop stopped: continuation failed: ${errorToMessage(error)}`, "error");
+				}
+			});
+		} catch (error) {
+			this.stop(`Ralph Loop stopped: could not schedule continuation: ${errorToMessage(error)}`, "error");
+		}
 	}
 
 	shutdown(): void {
@@ -165,15 +181,18 @@ export class RalphLoopController {
 			return;
 		}
 
-		await ctx.waitForIdle();
-
-		if (this.state.stopRequested) {
-			this.stop("Ralph Loop stopped.", "info");
+		if (this.stopIfNoFurtherIterationsNeeded()) {
 			return;
 		}
 
-		if (this.state.iterationsStarted >= this.maxIterations) {
-			this.stop(`Ralph Loop reached the ${this.maxIterations}-iteration cap.`, "info");
+		await ctx.waitForIdle();
+
+		if (!this.state.active || this.stopIfNoFurtherIterationsNeeded()) {
+			return;
+		}
+
+		if (ctx.hasPendingMessages()) {
+			this.stop("Ralph Loop stopped: another message is queued.", "warning");
 			return;
 		}
 
@@ -183,6 +202,20 @@ export class RalphLoopController {
 		}
 
 		this.startNextIteration(ctx);
+	}
+
+	private stopIfNoFurtherIterationsNeeded(): boolean {
+		if (this.state.stopRequested) {
+			this.stop("Ralph Loop stopped.", "info");
+			return true;
+		}
+
+		if (this.state.iterationsStarted >= this.maxIterations) {
+			this.stop(`Ralph Loop reached the ${this.maxIterations}-iteration cap.`, "info");
+			return true;
+		}
+
+		return false;
 	}
 
 	private async resetActiveContext(ctx: LoopCommandContextLike): Promise<boolean> {

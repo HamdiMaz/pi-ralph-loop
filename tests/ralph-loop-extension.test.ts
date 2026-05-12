@@ -64,6 +64,7 @@ test("/loop command sends the first prompt through Pi", async () => {
 
 	await command.handler("ship it", {
 		isIdle: () => true,
+		hasPendingMessages: () => false,
 		waitForIdle: async () => {},
 		sessionManager: { getLeafId: () => null, getEntries: () => [] },
 		navigateTree: async () => ({ cancelled: false }),
@@ -95,6 +96,7 @@ test("/loop command records a reset checkpoint before sending the first prompt",
 
 	await command.handler("ship it", {
 		isIdle: () => true,
+		hasPendingMessages: () => false,
 		waitForIdle: async () => {},
 		sessionManager: {
 			getLeafId: () => leafId,

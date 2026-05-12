@@ -63,6 +63,7 @@ function checkpointEntry(id: string, parentId: string | null, prompt: string): T
 
 function createContext(entries: TestEntry[] = [rootUserEntry("root")], initialLeafId?: string | null) {
 	let idle = true;
+	let pendingMessages = false;
 	let leafId = initialLeafId ?? entries.at(-1)?.id ?? null;
 	const actions: string[] = [];
 	const ctx = {
@@ -70,8 +71,14 @@ function createContext(entries: TestEntry[] = [rootUserEntry("root")], initialLe
 		setIdle(value: boolean) {
 			idle = value;
 		},
+		setPendingMessages(value: boolean) {
+			pendingMessages = value;
+		},
 		isIdle() {
 			return idle;
+		},
+		hasPendingMessages() {
+			return pendingMessages;
 		},
 		async waitForIdle() {
 			actions.push("waitForIdle");
@@ -162,6 +169,18 @@ test("/loop without a prompt refuses to start when inactive", async () => {
 	assert.ok(ctx.actions.includes("notify:warning:Usage: /loop <prompt>"));
 });
 
+test("/loop refuses to start while another message is queued", async () => {
+	const { controller, sentPrompts } = createHarness();
+	const ctx = createContext();
+	ctx.setPendingMessages(true);
+
+	await controller.handleCommand("do not race queued work", ctx);
+
+	assert.deepEqual(sentPrompts, []);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:warning:Ralph Loop can only start when no messages are queued."));
+});
+
 test("calling /loop while active requests a graceful stop and does not queue another prompt", async () => {
 	const { controller, sentPrompts, scheduled } = createHarness();
 	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
@@ -199,6 +218,24 @@ test("agent_end resets active context with tree navigation before sending the ne
 	assert.equal(controller.getState().iterationsStarted, 2);
 });
 
+test("agent_end stops before resetting when another message is queued", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+
+	await controller.handleCommand("do not interrupt queued work", ctx);
+	ctx.setPendingMessages(true);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["do not interrupt queued work"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:warning:Ralph Loop stopped: another message is queued."));
+	assert.deepEqual(
+		ctx.actions.filter((action) => action.startsWith("navigate:") || action.startsWith("editor:")),
+		[],
+	);
+});
+
 test("agent_end prefers a custom reset checkpoint when one is created at loop start", async () => {
 	const entries = [rootUserEntry("root"), assistantEntry("assistant", "root")];
 	const ctx = createContext(entries, "assistant");
@@ -217,6 +254,19 @@ test("agent_end prefers a custom reset checkpoint when one is created at loop st
 		["navigate:checkpoint:summarize=false", "editor:"],
 	);
 	assert.equal(controller.getState().iterationsStarted, 2);
+});
+
+test("/loop reports reset checkpoint creation failures without starting", async () => {
+	const ctx = createContext();
+	const { controller, sentPrompts } = createHarness(10, () => {
+		throw new Error("session is read-only");
+	});
+
+	await controller.handleCommand("cannot checkpoint", ctx);
+
+	assert.deepEqual(sentPrompts, []);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop could not start: reset checkpoint failed: session is read-only"));
 });
 
 test("a custom reset checkpoint lets an empty session reset before the first loop prompt", async () => {
@@ -305,7 +355,45 @@ test("the loop stops and notifies when context reset throws", async () => {
 	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: context reset failed: tree unavailable"));
 });
 
-test("the loop stops and notifies when waiting for idle fails", async () => {
+test("a stop request stops cleanly without waiting for idle again", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+	ctx.waitForIdle = async () => {
+		ctx.actions.push("waitForIdle:throw");
+		throw new Error("idle unavailable");
+	};
+
+	await controller.handleCommand("stop before waiting", ctx);
+	ctx.setIdle(false);
+	await controller.handleCommand("", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["stop before waiting"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:info:Ralph Loop stopped."));
+	assert.ok(!ctx.actions.includes("waitForIdle:throw"));
+});
+
+test("the iteration cap stops cleanly without waiting for idle again", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness(1);
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+	ctx.waitForIdle = async () => {
+		ctx.actions.push("waitForIdle:throw");
+		throw new Error("idle unavailable");
+	};
+
+	await controller.handleCommand("one shot", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["one shot"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:info:Ralph Loop reached the 1-iteration cap."));
+	assert.ok(!ctx.actions.includes("waitForIdle:throw"));
+});
+
+test("the loop stops and notifies when waiting for idle fails before another iteration is needed", async () => {
 	const { controller, sentPrompts, scheduled } = createHarness();
 	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
 	ctx.waitForIdle = async () => {
@@ -321,6 +409,27 @@ test("the loop stops and notifies when waiting for idle fails", async () => {
 	assert.equal(controller.getState().active, false);
 	assert.ok(ctx.actions.includes("status:ralph-loop:"));
 	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: continuation failed: idle unavailable"));
+});
+
+test("the loop stops and notifies when scheduling a continuation fails", async () => {
+	const sentPrompts: string[] = [];
+	const controller = new RalphLoopController({
+		sendUserMessage(prompt) {
+			sentPrompts.push(prompt);
+		},
+		schedule() {
+			throw new Error("scheduler unavailable");
+		},
+	});
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+
+	await controller.handleCommand("recover from scheduler failure", ctx);
+	assert.doesNotThrow(() => controller.handleAgentEnd());
+
+	assert.deepEqual(sentPrompts, ["recover from scheduler failure"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not schedule continuation: scheduler unavailable"));
 });
 
 test("the loop stops and notifies when starting an iteration fails", async () => {
