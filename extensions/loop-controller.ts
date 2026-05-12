@@ -185,21 +185,13 @@ export class RalphLoopController {
 			return;
 		}
 
-		if (this.stopIfNoFurtherIterationsNeeded()) {
-			return;
-		}
-
-		if (this.stopIfQueuedMessages(ctx)) {
+		if (this.stopIfCannotContinue(ctx)) {
 			return;
 		}
 
 		await ctx.waitForIdle();
 
-		if (!this.state.active || this.stopIfNoFurtherIterationsNeeded()) {
-			return;
-		}
-
-		if (this.stopIfQueuedMessages(ctx)) {
+		if (!this.state.active || this.stopIfCannotContinue(ctx)) {
 			return;
 		}
 
@@ -208,15 +200,15 @@ export class RalphLoopController {
 			return;
 		}
 
-		if (this.stopIfNoFurtherIterationsNeeded()) {
-			return;
-		}
-
-		if (this.stopIfQueuedMessages(ctx)) {
+		if (this.stopIfCannotContinue(ctx)) {
 			return;
 		}
 
 		this.startNextIteration(ctx);
+	}
+
+	private stopIfCannotContinue(ctx: LoopCommandContextLike): boolean {
+		return this.stopIfNoFurtherIterationsNeeded() || this.stopIfQueuedMessages(ctx);
 	}
 
 	private stopIfNoFurtherIterationsNeeded(): boolean {

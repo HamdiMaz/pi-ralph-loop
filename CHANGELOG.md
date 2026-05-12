@@ -11,6 +11,8 @@
 
 ### Changed
 - Updated package keywords and description to match the Ralph Loop extension.
+- Simplified loop continuation guard logic and reused the controller's shared default iteration cap in extension wiring.
+- Documented public-package safety notes for automatic prompt replay.
 
 ### Fixed
 - Fixed stale command context retention after refused or stopped loops so later shutdowns do not update an old UI context.

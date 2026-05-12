@@ -1,15 +1,13 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-import { LOOP_CHECKPOINT_CUSTOM_TYPE, RalphLoopController } from "./loop-controller.ts";
-
-const MAX_ITERATIONS = 10;
+import { DEFAULT_MAX_ITERATIONS, LOOP_CHECKPOINT_CUSTOM_TYPE, RalphLoopController } from "./loop-controller.ts";
 
 export default function registerRalphLoop(pi: ExtensionAPI): void {
 	const controller = new RalphLoopController({
-		maxIterations: MAX_ITERATIONS,
+		maxIterations: DEFAULT_MAX_ITERATIONS,
 		createResetCheckpoint(ctx, prompt) {
 			const previousLeafId = ctx.sessionManager.getLeafId();
-			pi.appendEntry(LOOP_CHECKPOINT_CUSTOM_TYPE, { maxIterations: MAX_ITERATIONS, prompt });
+			pi.appendEntry(LOOP_CHECKPOINT_CUSTOM_TYPE, { maxIterations: DEFAULT_MAX_ITERATIONS, prompt });
 			const checkpointId = ctx.sessionManager.getLeafId();
 			return checkpointId && checkpointId !== previousLeafId ? checkpointId : undefined;
 		},

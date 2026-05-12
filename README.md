@@ -42,6 +42,10 @@ Or create `.pi/settings.json` in this checkout for project-local loading:
 
 To stop an active loop, run `/loop` again. The extension will finish the current agent run, clear the Ralph Loop status, and stop without queuing another prompt.
 
+## Safety notes
+
+Pi extensions run with your local Pi permissions. Ralph Loop can automatically send the same prompt multiple times, so install it only in projects where repeated agent runs are expected and review the prompt before starting a loop.
+
 ## Behavior notes
 
 - The 10-iteration cap is intentional to prevent accidental infinite loops.
