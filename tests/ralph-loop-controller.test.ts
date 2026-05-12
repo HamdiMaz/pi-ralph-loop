@@ -213,6 +213,23 @@ test("calling /loop while active requests a graceful stop and does not queue ano
 	assert.ok(ctx.actions.includes("status:ralph-loop:"));
 });
 
+test("calling /loop while active and already idle stops immediately with a single notification", async () => {
+	const { controller, sentPrompts } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+
+	await controller.handleCommand("keep going", ctx);
+	ctx.actions.length = 0;
+	await controller.handleCommand("", ctx);
+
+	assert.equal(controller.getState().active, false);
+	assert.deepEqual(sentPrompts, ["keep going"]);
+	assert.deepEqual(
+		ctx.actions.filter((action) => action.startsWith("notify:")),
+		["notify:info:Ralph Loop stopped."],
+	);
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+});
+
 test("agent_end resets active context with tree navigation before sending the next iteration", async () => {
 	const { controller, sentPrompts, scheduled } = createHarness();
 	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
@@ -320,6 +337,24 @@ test("/loop reports reset checkpoint creation failures without starting", async 
 	assert.deepEqual(sentPrompts, []);
 	assert.equal(controller.getState().active, false);
 	assert.ok(ctx.actions.includes("notify:error:Ralph Loop could not start: reset checkpoint failed: session is read-only"));
+});
+
+test("/loop reports reset checkpoint failures even when the thrown value cannot be stringified", async () => {
+	const ctx = createContext();
+	const thrownValue = {
+		toString() {
+			throw new Error("toString failed");
+		},
+	};
+	const { controller, sentPrompts } = createHarness(10, () => {
+		throw thrownValue;
+	});
+
+	await assert.doesNotReject(() => controller.handleCommand("cannot checkpoint", ctx));
+
+	assert.deepEqual(sentPrompts, []);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop could not start: reset checkpoint failed: Unknown error"));
 });
 
 test("a custom reset checkpoint lets an empty session reset before the first loop prompt", async () => {

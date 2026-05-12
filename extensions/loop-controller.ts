@@ -67,10 +67,14 @@ function contentToText(content: NonNullable<LoopEntry["message"]>["content"] | u
 }
 
 function errorToMessage(error: unknown): string {
-	if (error instanceof Error && error.message) {
-		return error.message;
+	if (error instanceof Error) {
+		return error.message || error.name || "Error";
 	}
-	return String(error);
+	try {
+		return String(error) || "Unknown error";
+	} catch {
+		return "Unknown error";
+	}
 }
 
 export class RalphLoopController {
@@ -100,10 +104,11 @@ export class RalphLoopController {
 		if (this.state.active) {
 			this.context = ctx;
 			this.state.stopRequested = true;
-			ctx.ui.notify("Ralph Loop will stop after the current run finishes.", "info");
 			if (ctx.isIdle() && !this.continuationScheduled) {
 				this.stop("Ralph Loop stopped.", "info");
+				return;
 			}
+			ctx.ui.notify("Ralph Loop will stop after the current run finishes.", "info");
 			return;
 		}
 
