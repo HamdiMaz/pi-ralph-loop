@@ -8,11 +8,18 @@ type RegisteredCommand = {
 	handler: (args: string, ctx: unknown) => Promise<void>;
 };
 
-function createPiHarness() {
+function createPiHarness(options: { onAppendEntry?: (customType: string, data: unknown) => void } = {}) {
 	const commands = new Map<string, RegisteredCommand>();
 	const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => void>>();
+	const events: string[] = [];
 	const sentPrompts: string[] = [];
+	const appendedEntries: Array<{ customType: string; data: unknown }> = [];
 	const pi = {
+		appendEntry(customType: string, data: unknown) {
+			events.push(`append:${customType}`);
+			appendedEntries.push({ customType, data });
+			options.onAppendEntry?.(customType, data);
+		},
 		registerCommand(name: string, command: RegisteredCommand) {
 			commands.set(name, command);
 		},
@@ -22,10 +29,11 @@ function createPiHarness() {
 			handlers.set(eventName, existing);
 		},
 		sendUserMessage(prompt: string) {
+			events.push(`send:${prompt}`);
 			sentPrompts.push(prompt);
 		},
 	};
-	return { pi, commands, handlers, sentPrompts };
+	return { pi, appendedEntries, commands, events, handlers, sentPrompts };
 }
 
 test("registers the /loop command", () => {
@@ -67,4 +75,43 @@ test("/loop command sends the first prompt through Pi", async () => {
 	});
 
 	assert.deepEqual(sentPrompts, ["ship it"]);
+});
+
+test("/loop command records a reset checkpoint before sending the first prompt", async () => {
+	const entries: Array<{ type: string; id: string; parentId: string | null; customType?: string; data?: unknown }> = [
+		{ type: "message", id: "root", parentId: null },
+	];
+	let leafId: string | null = "root";
+	const { pi, appendedEntries, commands, events, sentPrompts } = createPiHarness({
+		onAppendEntry(customType, data) {
+			const id = `entry-${entries.length}`;
+			entries.push({ type: "custom", customType, data, id, parentId: leafId });
+			leafId = id;
+		},
+	});
+	registerRalphLoop(pi as never);
+	const command = commands.get("loop");
+	assert.ok(command);
+
+	await command.handler("ship it", {
+		isIdle: () => true,
+		waitForIdle: async () => {},
+		sessionManager: {
+			getLeafId: () => leafId,
+			getEntries: () => entries,
+		},
+		navigateTree: async () => ({ cancelled: false }),
+		ui: {
+			notify: () => {},
+			setStatus: () => {},
+			setEditorText: () => {},
+		},
+	});
+
+	assert.deepEqual(sentPrompts, ["ship it"]);
+	assert.deepEqual(events, ["append:ralph-loop-checkpoint", "send:ship it"]);
+	assert.deepEqual(appendedEntries, [
+		{ customType: "ralph-loop-checkpoint", data: { maxIterations: 10, prompt: "ship it" } },
+	]);
+	assert.equal(leafId, "entry-1");
 });

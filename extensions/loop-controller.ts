@@ -1,4 +1,5 @@
 export const DEFAULT_MAX_ITERATIONS = 10;
+export const LOOP_CHECKPOINT_CUSTOM_TYPE = "ralph-loop-checkpoint";
 export const STATUS_KEY = "ralph-loop";
 
 type NotifyType = "info" | "warning" | "error";
@@ -34,6 +35,7 @@ export type LoopCommandContextLike = {
 
 export type RalphLoopControllerOptions = {
 	maxIterations?: number;
+	createResetCheckpoint?(ctx: LoopCommandContextLike, prompt: string): string | undefined;
 	sendUserMessage(prompt: string): void;
 	schedule(task: () => Promise<void> | void): void;
 };
@@ -65,6 +67,7 @@ function contentToText(content: NonNullable<LoopEntry["message"]>["content"] | u
 
 export class RalphLoopController {
 	private readonly maxIterations: number;
+	private readonly createResetCheckpoint: RalphLoopControllerOptions["createResetCheckpoint"];
 	private readonly sendUserMessage: (prompt: string) => void;
 	private readonly schedule: (task: () => Promise<void> | void) => void;
 	private context: LoopCommandContextLike | undefined;
@@ -75,6 +78,7 @@ export class RalphLoopController {
 
 	constructor(options: RalphLoopControllerOptions) {
 		this.maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+		this.createResetCheckpoint = options.createResetCheckpoint;
 		this.sendUserMessage = options.sendUserMessage;
 		this.schedule = options.schedule;
 		this.state = this.createInactiveState();
@@ -110,7 +114,12 @@ export class RalphLoopController {
 		const entriesAtStart = ctx.sessionManager.getEntries();
 		this.entryIdsAtStart = new Set(entriesAtStart.map((entry) => entry.id));
 		const startLeafId = ctx.sessionManager.getLeafId();
-		this.resetTarget = startLeafId ? { kind: "entry", id: startLeafId } : { kind: "firstLoopPrompt", prompt };
+		const checkpointId = this.createResetCheckpoint?.(ctx, prompt);
+		this.resetTarget = checkpointId
+			? { kind: "entry", id: checkpointId }
+			: startLeafId
+				? { kind: "entry", id: startLeafId }
+				: { kind: "firstLoopPrompt", prompt };
 
 		this.state = {
 			active: true,

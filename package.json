@@ -1,14 +1,22 @@
 {
   "name": "ralph-loop",
   "version": "0.1.0",
-  "private": true,
+  "description": "Pi extension that reruns a prompt from a clean session checkpoint for bounded Ralph loops.",
   "type": "module",
+  "license": "MIT",
   "keywords": [
     "pi-package",
     "pi-extension",
-    "ask-user-question",
-    "terminal-ui",
-    "tui"
+    "pi-agent",
+    "ralph-loop",
+    "automation",
+    "context-reset"
+  ],
+  "files": [
+    "extensions",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "test": "node --test tests/*.test.ts",
