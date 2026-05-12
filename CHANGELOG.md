@@ -12,6 +12,7 @@
 - Updated package keywords and description to match the Ralph Loop extension.
 
 ### Fixed
+- Fixed stale command context retention after refused or stopped loops so later shutdowns do not update an old UI context.
 - Fixed queued-message race handling so Ralph Loop stops before waiting for idle when another message is already queued.
 - Fixed a post-reset race so queued messages or stop requests that arrive during context reset prevent the next iteration from being sent.
 - Fixed empty-session loops so subsequent iterations reset before the first prompt instead of failing to find a reset target or retaining the first prompt in active context.

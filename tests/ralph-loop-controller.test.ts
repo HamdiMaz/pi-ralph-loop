@@ -169,6 +169,17 @@ test("/loop without a prompt refuses to start when inactive", async () => {
 	assert.ok(ctx.actions.includes("notify:warning:Usage: /loop <prompt>"));
 });
 
+test("/loop without a prompt does not retain command context after refusing to start", async () => {
+	const { controller } = createHarness();
+	const ctx = createContext();
+
+	await controller.handleCommand("   ", ctx);
+	ctx.actions.length = 0;
+	controller.shutdown();
+
+	assert.deepEqual(ctx.actions, []);
+});
+
 test("/loop refuses to start while another message is queued", async () => {
 	const { controller, sentPrompts } = createHarness();
 	const ctx = createContext();
@@ -344,6 +355,19 @@ test("the iteration cap stops the loop after the configured number of total runs
 	assert.deepEqual(sentPrompts, ["bounded", "bounded"]);
 	assert.equal(controller.getState().active, false);
 	assert.ok(ctx.actions.includes("notify:info:Ralph Loop reached the 2-iteration cap."));
+});
+
+test("a stopped loop releases its command context", async () => {
+	const { controller, scheduled } = createHarness(1);
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+
+	await controller.handleCommand("one shot", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+	ctx.actions.length = 0;
+	controller.shutdown();
+
+	assert.deepEqual(ctx.actions, []);
 });
 
 test("agent_end resets to the loop start checkpoint when the session starts with non-user entries", async () => {

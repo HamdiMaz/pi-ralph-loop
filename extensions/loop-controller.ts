@@ -97,9 +97,8 @@ export class RalphLoopController {
 	}
 
 	async handleCommand(args: string, ctx: LoopCommandContextLike): Promise<void> {
-		this.context = ctx;
-
 		if (this.state.active) {
+			this.context = ctx;
 			this.state.stopRequested = true;
 			ctx.ui.notify("Ralph Loop will stop after the current run finishes.", "info");
 			if (ctx.isIdle() && !this.continuationScheduled) {
@@ -124,6 +123,7 @@ export class RalphLoopController {
 			return;
 		}
 
+		this.context = ctx;
 		const entriesAtStart = ctx.sessionManager.getEntries();
 		this.entryIdsAtStart = new Set(entriesAtStart.map((entry) => entry.id));
 		const startLeafId = ctx.sessionManager.getLeafId();
@@ -172,7 +172,6 @@ export class RalphLoopController {
 
 	shutdown(): void {
 		this.stop(undefined, "info");
-		this.context = undefined;
 	}
 
 	private async continueAfterAgentEnd(): Promise<void> {
@@ -310,6 +309,7 @@ export class RalphLoopController {
 		this.continuationScheduled = false;
 		this.resetTarget = undefined;
 		this.entryIdsAtStart = new Set<string>();
+		this.context = undefined;
 		if (ctx) {
 			ctx.ui.setStatus(STATUS_KEY, undefined);
 			if (message) {
