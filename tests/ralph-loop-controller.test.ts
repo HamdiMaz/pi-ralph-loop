@@ -237,6 +237,47 @@ test("agent_end stops before resetting when another message is queued", async ()
 	);
 });
 
+test("agent_end stops after resetting if another message is queued before the next iteration", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+	ctx.navigateTree = async (targetId: string, options: { summarize?: boolean }) => {
+		ctx.actions.push(`navigate:${targetId}:summarize=${String(options.summarize)}`);
+		ctx.setPendingMessages(true);
+		return { cancelled: false };
+	};
+
+	await controller.handleCommand("do not race after reset", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["do not race after reset"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:warning:Ralph Loop stopped: another message is queued."));
+	assert.deepEqual(
+		ctx.actions.filter((action) => action.startsWith("navigate:") || action.startsWith("editor:")),
+		["navigate:root:summarize=false", "editor:"],
+	);
+});
+
+test("agent_end honors a stop request made during reset before starting the next iteration", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+	ctx.navigateTree = async (targetId: string, options: { summarize?: boolean }) => {
+		ctx.actions.push(`navigate:${targetId}:summarize=${String(options.summarize)}`);
+		ctx.setIdle(false);
+		await controller.handleCommand("", ctx);
+		return { cancelled: false };
+	};
+
+	await controller.handleCommand("stop during reset", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["stop during reset"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("notify:info:Ralph Loop stopped."));
+});
+
 test("agent_end prefers a custom reset checkpoint when one is created at loop start", async () => {
 	const entries = [rootUserEntry("root"), assistantEntry("assistant", "root")];
 	const ctx = createContext(entries, "assistant");

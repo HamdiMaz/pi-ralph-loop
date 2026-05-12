@@ -185,8 +185,7 @@ export class RalphLoopController {
 			return;
 		}
 
-		if (ctx.hasPendingMessages()) {
-			this.stop("Ralph Loop stopped: another message is queued.", "warning");
+		if (this.stopIfQueuedMessages(ctx)) {
 			return;
 		}
 
@@ -196,13 +195,20 @@ export class RalphLoopController {
 			return;
 		}
 
-		if (ctx.hasPendingMessages()) {
-			this.stop("Ralph Loop stopped: another message is queued.", "warning");
+		if (this.stopIfQueuedMessages(ctx)) {
 			return;
 		}
 
 		const resetSucceeded = await this.resetActiveContext(ctx);
 		if (!resetSucceeded) {
+			return;
+		}
+
+		if (this.stopIfNoFurtherIterationsNeeded()) {
+			return;
+		}
+
+		if (this.stopIfQueuedMessages(ctx)) {
 			return;
 		}
 
@@ -221,6 +227,15 @@ export class RalphLoopController {
 		}
 
 		return false;
+	}
+
+	private stopIfQueuedMessages(ctx: LoopCommandContextLike): boolean {
+		if (!ctx.hasPendingMessages()) {
+			return false;
+		}
+
+		this.stop("Ralph Loop stopped: another message is queued.", "warning");
+		return true;
 	}
 
 	private async resetActiveContext(ctx: LoopCommandContextLike): Promise<boolean> {
