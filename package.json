@@ -21,7 +21,9 @@
   "scripts": {
     "test": "node --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "verify": "npm test && npm run lint && npm run typecheck",
+    "prepack": "npm run verify"
   },
   "pi": {
     "extensions": [

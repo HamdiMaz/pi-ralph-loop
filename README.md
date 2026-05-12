@@ -52,7 +52,7 @@ To stop an active loop, run `/loop` again. The extension will finish the current
 ## Development
 
 ```bash
-npm test
-npm run lint
-npm run typecheck
+npm run verify
 ```
+
+`npm run verify` runs the test, lint, and typecheck suites. The package also runs this verification automatically before `npm pack`/publish via `prepack`.

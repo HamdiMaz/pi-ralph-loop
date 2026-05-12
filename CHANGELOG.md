@@ -7,6 +7,7 @@
 - Added tracked lint/typecheck configuration and package lock support for reproducible development verification.
 - Added hidden `ralph-loop-checkpoint` session entries so loops can reset to an exact pre-loop checkpoint.
 - Added tests covering checkpoint creation and empty-session loop resets.
+- Added release metadata tests and a `prepack` verification hook so package packing/publishing runs test, lint, and typecheck first.
 
 ### Changed
 - Updated package keywords and description to match the Ralph Loop extension.
