@@ -107,6 +107,7 @@ function createContext(entries: TestEntry[] = [rootUserEntry("root")], initialLe
 function createHarness(
 	maxIterations = 10,
 	createResetCheckpoint?: (ctx: LoopCommandContextLike, prompt: string) => string | undefined,
+	sendUserMessage?: (prompt: string, sentPrompts: string[]) => void,
 ) {
 	const sentPrompts: string[] = [];
 	const scheduled: Array<() => Promise<void> | void> = [];
@@ -114,6 +115,10 @@ function createHarness(
 		maxIterations,
 		createResetCheckpoint,
 		sendUserMessage(prompt: string) {
+			if (sendUserMessage) {
+				sendUserMessage(prompt, sentPrompts);
+				return;
+			}
 			sentPrompts.push(prompt);
 		},
 		schedule(task: () => Promise<void> | void) {
@@ -298,4 +303,36 @@ test("the loop stops and notifies when context reset throws", async () => {
 	assert.equal(controller.getState().active, false);
 	assert.ok(ctx.actions.includes("status:ralph-loop:"));
 	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: context reset failed: tree unavailable"));
+});
+
+test("the loop stops and notifies when waiting for idle fails", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+	ctx.waitForIdle = async () => {
+		ctx.actions.push("waitForIdle:throw");
+		throw new Error("idle unavailable");
+	};
+
+	await controller.handleCommand("recover from idle failure", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["recover from idle failure"]);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: continuation failed: idle unavailable"));
+});
+
+test("the loop stops and notifies when starting an iteration fails", async () => {
+	const { controller, sentPrompts } = createHarness(10, undefined, () => {
+		throw new Error("agent busy");
+	});
+	const ctx = createContext();
+
+	await controller.handleCommand("cannot send", ctx);
+
+	assert.deepEqual(sentPrompts, []);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not start iteration: agent busy"));
 });

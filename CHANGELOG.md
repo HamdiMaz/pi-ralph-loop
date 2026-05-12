@@ -14,3 +14,4 @@
 ### Fixed
 - Fixed empty-session loops so subsequent iterations reset before the first prompt instead of failing to find a reset target or retaining the first prompt in active context.
 - Fixed unexpected session tree reset failures so Ralph Loop stops cleanly, clears its status, and notifies the user instead of leaving an active loop stuck.
+- Fixed unexpected idle-wait and prompt-send failures so Ralph Loop clears its status and reports the error instead of leaving a stale active loop.

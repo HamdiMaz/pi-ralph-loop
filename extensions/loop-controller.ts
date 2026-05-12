@@ -146,7 +146,11 @@ export class RalphLoopController {
 		this.continuationScheduled = true;
 		this.schedule(async () => {
 			this.continuationScheduled = false;
-			await this.continueAfterAgentEnd();
+			try {
+				await this.continueAfterAgentEnd();
+			} catch (error) {
+				this.stop(`Ralph Loop stopped: continuation failed: ${errorToMessage(error)}`, "error");
+			}
 		});
 	}
 
@@ -240,7 +244,11 @@ export class RalphLoopController {
 
 		this.state.iterationsStarted += 1;
 		ctx.ui.setStatus(STATUS_KEY, `Loop ${this.state.iterationsStarted}/${this.maxIterations}`);
-		this.sendUserMessage(this.state.prompt);
+		try {
+			this.sendUserMessage(this.state.prompt);
+		} catch (error) {
+			this.stop(`Ralph Loop stopped: could not start iteration: ${errorToMessage(error)}`, "error");
+		}
 	}
 
 	private stop(message: string | undefined, type: NotifyType): void {
