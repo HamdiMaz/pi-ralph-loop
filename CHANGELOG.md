@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.1
+
+### Fixed
+- Fixed the README install command to use the published `pi-ralph-loop` package name.
+
 ## v0.1.0
 
 ### Added

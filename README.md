@@ -17,7 +17,7 @@ Ralph Loop is a [Pi](https://pi.dev) extension that repeats a prompt from a clea
 After publication:
 
 ```bash
-pi install npm:ralph-loop
+pi install npm:pi-ralph-loop
 ```
 
 For local development from this checkout:
