@@ -80,6 +80,9 @@ function createContext(entries: TestEntry[] = [rootUserEntry("root")], initialLe
 		hasPendingMessages() {
 			return pendingMessages;
 		},
+		abort() {
+			actions.push("abort");
+		},
 		async waitForIdle() {
 			actions.push("waitForIdle");
 		},
@@ -97,6 +100,11 @@ function createContext(entries: TestEntry[] = [rootUserEntry("root")], initialLe
 			return { cancelled: false };
 		},
 		ui: {
+			theme: {
+				fg(color: string, text: string) {
+					return `${color}:${text}`;
+				},
+			},
 			notify(message: string, type = "info") {
 				actions.push(`notify:${type}:${message}`);
 			},
@@ -155,7 +163,58 @@ test("/loop with a prompt starts the first iteration immediately", async () => {
 		maxIterations: 10,
 		stopRequested: false,
 	});
-	assert.ok(ctx.actions.includes("status:ralph-loop:Loop 1/10"));
+	assert.ok(ctx.actions.includes("status:ralph-loop:warning:Loop 1/10"));
+});
+
+test("updating maximum iterations affects subsequent loops", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+
+	controller.setMaxIterations(2);
+	await controller.handleCommand("bounded", ctx);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["bounded", "bounded"]);
+	assert.equal(controller.getState().active, false);
+	assert.equal(controller.getState().maxIterations, 2);
+	assert.ok(ctx.actions.includes("status:ralph-loop:warning:Loop 1/2"));
+	assert.ok(ctx.actions.includes("notify:info:Ralph Loop reached the 2-iteration cap."));
+});
+
+test("updating maximum iterations does not change an active loop's cap", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+
+	await controller.handleCommand("keep original cap", ctx);
+	controller.setMaxIterations(1);
+	controller.handleAgentEnd();
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(sentPrompts, ["keep original cap", "keep original cap"]);
+	assert.equal(controller.getState().active, true);
+	assert.equal(controller.getState().maxIterations, 10);
+	assert.ok(ctx.actions.includes("status:ralph-loop:warning:Loop 2/10"));
+});
+
+test("interrupt stops the active loop and aborts the current agent run", async () => {
+	const { controller, sentPrompts, scheduled } = createHarness();
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+
+	await controller.handleCommand("stop on escape", ctx);
+	ctx.actions.length = 0;
+
+	assert.equal(controller.interrupt(ctx), true);
+	controller.handleAgentEnd();
+
+	assert.deepEqual(sentPrompts, ["stop on escape"]);
+	assert.equal(controller.getState().active, false);
+	assert.deepEqual(scheduled, []);
+	assert.ok(ctx.actions.includes("abort"));
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+	assert.ok(ctx.actions.includes("notify:info:Ralph Loop stopped."));
 });
 
 test("/loop without a prompt refuses to start when inactive", async () => {

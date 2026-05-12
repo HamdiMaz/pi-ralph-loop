@@ -1,8 +1,12 @@
 export const DEFAULT_MAX_ITERATIONS = 10;
 export const LOOP_CHECKPOINT_CUSTOM_TYPE = "ralph-loop-checkpoint";
+export const LOOP_SETTINGS_CUSTOM_TYPE = "ralph-loop-settings";
 export const STATUS_KEY = "ralph-loop";
 
 type NotifyType = "info" | "warning" | "error";
+type LoopTheme = {
+	fg(color: "warning", text: string): string;
+};
 
 type LoopEntry = {
 	type: string;
@@ -28,15 +32,20 @@ export type LoopCommandContextLike = {
 	};
 	navigateTree(targetId: string, options: { summarize: boolean }): Promise<{ cancelled: boolean }>;
 	ui: {
+		theme: LoopTheme;
 		notify(message: string, type?: NotifyType): void;
 		setStatus(key: string, text: string | undefined): void;
 		setEditorText(text: string): void;
 	};
 };
 
+export type LoopInterruptContextLike = {
+	abort(): void;
+};
+
 export type RalphLoopControllerOptions = {
 	maxIterations?: number;
-	createResetCheckpoint?(ctx: LoopCommandContextLike, prompt: string): string | undefined;
+	createResetCheckpoint?(ctx: LoopCommandContextLike, prompt: string, maxIterations: number): string | undefined;
 	sendUserMessage(prompt: string): void;
 	schedule(task: () => Promise<void> | void): void;
 };
@@ -78,7 +87,7 @@ function errorToMessage(error: unknown): string {
 }
 
 export class RalphLoopController {
-	private readonly maxIterations: number;
+	private maxIterations: number;
 	private readonly createResetCheckpoint: RalphLoopControllerOptions["createResetCheckpoint"];
 	private readonly sendUserMessage: (prompt: string) => void;
 	private readonly schedule: (task: () => Promise<void> | void) => void;
@@ -98,6 +107,30 @@ export class RalphLoopController {
 
 	getState(): RalphLoopState {
 		return { ...this.state };
+	}
+
+	getMaxIterations(): number {
+		return this.maxIterations;
+	}
+
+	setMaxIterations(maxIterations: number): void {
+		this.maxIterations = maxIterations;
+		if (!this.state.active) {
+			this.state = this.createInactiveState();
+		}
+	}
+
+	interrupt(ctx: LoopInterruptContextLike): boolean {
+		if (!this.state.active) {
+			return false;
+		}
+
+		try {
+			ctx.abort();
+		} finally {
+			this.stop("Ralph Loop stopped.", "info");
+		}
+		return true;
 	}
 
 	async handleCommand(args: string, ctx: LoopCommandContextLike): Promise<void> {
@@ -134,7 +167,7 @@ export class RalphLoopController {
 		const startLeafId = ctx.sessionManager.getLeafId();
 		let checkpointId: string | undefined;
 		try {
-			checkpointId = this.createResetCheckpoint?.(ctx, prompt);
+			checkpointId = this.createResetCheckpoint?.(ctx, prompt, this.maxIterations);
 		} catch (error) {
 			this.stop(`Ralph Loop could not start: reset checkpoint failed: ${errorToMessage(error)}`, "error");
 			return;
@@ -217,8 +250,8 @@ export class RalphLoopController {
 			return true;
 		}
 
-		if (this.state.iterationsStarted >= this.maxIterations) {
-			this.stop(`Ralph Loop reached the ${this.maxIterations}-iteration cap.`, "info");
+		if (this.state.iterationsStarted >= this.state.maxIterations) {
+			this.stop(`Ralph Loop reached the ${this.state.maxIterations}-iteration cap.`, "info");
 			return true;
 		}
 
@@ -292,7 +325,10 @@ export class RalphLoopController {
 		}
 
 		this.state.iterationsStarted += 1;
-		ctx.ui.setStatus(STATUS_KEY, `Loop ${this.state.iterationsStarted}/${this.maxIterations}`);
+		ctx.ui.setStatus(
+			STATUS_KEY,
+			ctx.ui.theme.fg("warning", `Loop ${this.state.iterationsStarted}/${this.state.maxIterations}`),
+		);
 		try {
 			this.sendUserMessage(this.state.prompt);
 		} catch (error) {
