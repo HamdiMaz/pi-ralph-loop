@@ -1,5 +1,5 @@
 {
-  "name": "ralph-loop",
+  "name": "pi-ralph-loop",
   "version": "0.1.0",
   "description": "Pi extension that reruns a prompt from a clean session checkpoint for bounded Ralph loops.",
   "type": "module",
