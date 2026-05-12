@@ -1,6 +1,6 @@
 # Changelog
 
-## v.0.1.0
+## v0.1.0
 
 ### Added
 - Added `/loop-settings` for changing the maximum Ralph Loop iteration count.
