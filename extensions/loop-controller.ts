@@ -185,6 +185,11 @@ export class RalphLoopController {
 			return;
 		}
 
+		if (ctx.hasPendingMessages()) {
+			this.stop("Ralph Loop stopped: another message is queued.", "warning");
+			return;
+		}
+
 		await ctx.waitForIdle();
 
 		if (!this.state.active || this.stopIfNoFurtherIterationsNeeded()) {

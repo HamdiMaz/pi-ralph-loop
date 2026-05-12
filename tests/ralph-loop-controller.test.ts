@@ -230,6 +230,7 @@ test("agent_end stops before resetting when another message is queued", async ()
 	assert.deepEqual(sentPrompts, ["do not interrupt queued work"]);
 	assert.equal(controller.getState().active, false);
 	assert.ok(ctx.actions.includes("notify:warning:Ralph Loop stopped: another message is queued."));
+	assert.ok(!ctx.actions.includes("waitForIdle"), "queued work should stop the loop before waiting for idle");
 	assert.deepEqual(
 		ctx.actions.filter((action) => action.startsWith("navigate:") || action.startsWith("editor:")),
 		[],
