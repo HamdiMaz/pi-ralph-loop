@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import registerRalphLoop from "../extensions/index.ts";
 
@@ -18,7 +21,12 @@ type TestEntry = {
 
 type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
 
-function createPiHarness(options: { onAppendEntry?: (customType: string, data: unknown) => void } = {}) {
+function createPiHarness(
+	options: {
+		onAppendEntry?: (customType: string, data: unknown) => void;
+		onSendUserMessage?: (prompt: string) => Promise<void> | void;
+	} = {},
+) {
 	const commands = new Map<string, RegisteredCommand>();
 	const handlers = new Map<string, Array<(event: unknown, ctx: unknown) => void>>();
 	const events: string[] = [];
@@ -41,6 +49,7 @@ function createPiHarness(options: { onAppendEntry?: (customType: string, data: u
 		sendUserMessage(prompt: string) {
 			events.push(`send:${prompt}`);
 			sentPrompts.push(prompt);
+			return options.onSendUserMessage?.(prompt);
 		},
 	};
 	return { pi, appendedEntries, commands, events, handlers, sentPrompts };
@@ -53,6 +62,7 @@ function createCommandContext(
 		selectResult?: string;
 		inputResult?: string;
 		terminalInputHandlers?: TerminalInputHandler[];
+		cwd?: string;
 	} = {},
 ) {
 	const actions: string[] = [];
@@ -63,6 +73,7 @@ function createCommandContext(
 		getAbortCount() {
 			return abortCount;
 		},
+		cwd: options.cwd ?? process.cwd(),
 		isIdle: () => true,
 		hasPendingMessages: () => false,
 		abort() {
@@ -167,6 +178,49 @@ test("/loop command records a reset checkpoint before sending the first prompt",
 		{ customType: "ralph-loop-checkpoint", data: { maxIterations: 10, prompt: "ship it" } },
 	]);
 	assert.equal(leafId, "entry-1");
+});
+
+test("/loop writes diagnostic events to the project log file", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "ralph-loop-test-"));
+	try {
+		const { pi, commands } = createPiHarness();
+		registerRalphLoop(pi as never);
+		const command = commands.get("loop");
+		assert.ok(command);
+
+		await command.handler("ship it", createCommandContext({ cwd }));
+
+		const logText = await readFile(join(cwd, ".pi", "ralph-loop-debug.jsonl"), "utf8");
+		const events = logText
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { event: string; prompt?: string });
+
+		assert.deepEqual(
+			events.map((event) => event.event),
+			["loop_start", "iteration_send_start", "iteration_send_succeeded"],
+		);
+		assert.equal(events[0]?.prompt, "ship it");
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("/loop catches async send failures from the Pi adapter", async () => {
+	const { pi, commands } = createPiHarness({
+		onSendUserMessage() {
+			return Promise.reject(new Error("adapter send failed"));
+		},
+	});
+	registerRalphLoop(pi as never);
+	const command = commands.get("loop");
+	assert.ok(command);
+	const ctx = createCommandContext();
+
+	await command.handler("ship it", ctx);
+
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not start iteration: adapter send failed"));
 });
 
 test("/loop-settings updates the maximum iteration cap used by later loops", async () => {

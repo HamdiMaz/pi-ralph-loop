@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.2
+
+### Added
+- Added project-local Ralph Loop diagnostic logging at `.pi/ralph-loop-debug.jsonl` for loop lifecycle decisions.
+
+### Fixed
+- Fixed Ralph Loop iteration startup handling so async prompt-send failures are awaited, reported, and stop the loop cleanly.
+
 ## v0.1.1
 
 ### Fixed

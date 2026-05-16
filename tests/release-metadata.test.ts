@@ -23,7 +23,7 @@ test("package metadata declares the Ralph Loop Pi package entrypoint", async () 
 	const packageJson = await readPackageJson();
 
 	assert.equal(packageJson.name, "pi-ralph-loop");
-	assert.equal(packageJson.version, "0.1.1");
+	assert.equal(packageJson.version, "0.1.2");
 	assert.ok(packageJson.keywords?.includes("pi-package"));
 	assert.deepEqual(packageJson.pi?.extensions, ["./extensions/index.ts"]);
 	await access(new URL("../extensions/index.ts", import.meta.url));

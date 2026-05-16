@@ -8,14 +8,44 @@ type LoopTheme = {
 	fg(color: "warning", text: string): string;
 };
 
+type LoopContentPart = { type: string; text?: string };
+
 type LoopEntry = {
 	type: string;
 	id: string;
 	parentId: string | null;
 	message?: {
 		role?: string;
-		content?: string | Array<{ type: string; text?: string }>;
+		content?: string | LoopContentPart[];
 	};
+};
+
+type LoopAgentMessage = {
+	role?: string;
+	stopReason?: string;
+	errorMessage?: string;
+	content?: string | LoopContentPart[];
+};
+
+export type LoopAgentEndEventLike = {
+	messages?: LoopAgentMessage[];
+};
+
+export type RalphLoopDebugEvent = {
+	timestamp: string;
+	event: string;
+	active: boolean;
+	prompt: string;
+	iterationsStarted: number;
+	maxIterations: number;
+	stopRequested: boolean;
+	message?: string;
+	notifyType?: NotifyType;
+	errorMessage?: string;
+	stopReason?: string;
+	assistantPreview?: string;
+	toolCallCount?: number;
+	toolResultCount?: number;
 };
 
 type ResetTarget =
@@ -46,8 +76,9 @@ export type LoopInterruptContextLike = {
 export type RalphLoopControllerOptions = {
 	maxIterations?: number;
 	createResetCheckpoint?(ctx: LoopCommandContextLike, prompt: string, maxIterations: number): string | undefined;
-	sendUserMessage(prompt: string): void;
+	sendUserMessage(prompt: string): Promise<void> | void;
 	schedule(task: () => Promise<void> | void): void;
+	logDebug?(event: RalphLoopDebugEvent): void;
 };
 
 export type RalphLoopState = {
@@ -89,8 +120,9 @@ function errorToMessage(error: unknown): string {
 export class RalphLoopController {
 	private maxIterations: number;
 	private readonly createResetCheckpoint: RalphLoopControllerOptions["createResetCheckpoint"];
-	private readonly sendUserMessage: (prompt: string) => void;
+	private readonly sendUserMessage: (prompt: string) => Promise<void> | void;
 	private readonly schedule: (task: () => Promise<void> | void) => void;
+	private debugLogger: ((event: RalphLoopDebugEvent) => void) | undefined;
 	private context: LoopCommandContextLike | undefined;
 	private continuationScheduled = false;
 	private resetTarget: ResetTarget | undefined;
@@ -102,7 +134,12 @@ export class RalphLoopController {
 		this.createResetCheckpoint = options.createResetCheckpoint;
 		this.sendUserMessage = options.sendUserMessage;
 		this.schedule = options.schedule;
+		this.debugLogger = options.logDebug;
 		this.state = this.createInactiveState();
+	}
+
+	setDebugLogger(logger: ((event: RalphLoopDebugEvent) => void) | undefined): void {
+		this.debugLogger = logger;
 	}
 
 	getState(): RalphLoopState {
@@ -185,15 +222,18 @@ export class RalphLoopController {
 			maxIterations: this.maxIterations,
 			stopRequested: false,
 		};
-		this.startNextIteration(ctx);
+		this.emitDebug({ event: "loop_start" });
+		await this.startNextIteration(ctx);
 	}
 
-	handleAgentEnd(): void {
+	handleAgentEnd(event?: LoopAgentEndEventLike): void {
 		if (!this.state.active || this.continuationScheduled) {
 			return;
 		}
 
+		this.emitAgentEndDebug(event);
 		this.continuationScheduled = true;
+		this.emitDebug({ event: "continuation_scheduled" });
 		try {
 			this.schedule(async () => {
 				this.continuationScheduled = false;
@@ -218,6 +258,7 @@ export class RalphLoopController {
 			return;
 		}
 
+		this.emitDebug({ event: "continuation_start" });
 		if (this.stopIfCannotContinue(ctx)) {
 			return;
 		}
@@ -237,7 +278,7 @@ export class RalphLoopController {
 			return;
 		}
 
-		this.startNextIteration(ctx);
+		await this.startNextIteration(ctx);
 	}
 
 	private stopIfCannotContinue(ctx: LoopCommandContextLike): boolean {
@@ -319,7 +360,7 @@ export class RalphLoopController {
 		return firstLoopPrompt.id;
 	}
 
-	private startNextIteration(ctx: LoopCommandContextLike): void {
+	private async startNextIteration(ctx: LoopCommandContextLike): Promise<void> {
 		if (!this.state.active) {
 			return;
 		}
@@ -329,15 +370,19 @@ export class RalphLoopController {
 			STATUS_KEY,
 			ctx.ui.theme.fg("warning", `Loop ${this.state.iterationsStarted}/${this.state.maxIterations}`),
 		);
+		this.emitDebug({ event: "iteration_send_start" });
 		try {
-			this.sendUserMessage(this.state.prompt);
+			await this.sendUserMessage(this.state.prompt);
+			this.emitDebug({ event: "iteration_send_succeeded" });
 		} catch (error) {
+			this.emitDebug({ event: "iteration_send_failed", errorMessage: errorToMessage(error) });
 			this.stop(`Ralph Loop stopped: could not start iteration: ${errorToMessage(error)}`, "error");
 		}
 	}
 
 	private stop(message: string | undefined, type: NotifyType): void {
 		const ctx = this.context;
+		this.emitDebug({ event: "loop_stop", message, notifyType: type });
 		this.state = this.createInactiveState();
 		this.continuationScheduled = false;
 		this.resetTarget = undefined;
@@ -359,5 +404,40 @@ export class RalphLoopController {
 			maxIterations: this.maxIterations,
 			stopRequested: false,
 		};
+	}
+
+	private emitDebug(details: Omit<RalphLoopDebugEvent, keyof RalphLoopState | "timestamp">): void {
+		if (!this.debugLogger) {
+			return;
+		}
+
+		try {
+			this.debugLogger({
+				timestamp: new Date().toISOString(),
+				active: this.state.active,
+				prompt: this.state.prompt,
+				iterationsStarted: this.state.iterationsStarted,
+				maxIterations: this.state.maxIterations,
+				stopRequested: this.state.stopRequested,
+				...details,
+			});
+		} catch {
+			// Diagnostic logging must not affect loop control flow.
+		}
+	}
+
+	private emitAgentEndDebug(event: LoopAgentEndEventLike | undefined): void {
+		const messages = event?.messages ?? [];
+		const assistant = [...messages].reverse().find((message) => message.role === "assistant");
+		const content = assistant?.content;
+		const contentParts = Array.isArray(content) ? content : [];
+		this.emitDebug({
+			event: "agent_end",
+			stopReason: assistant?.stopReason ?? "stop",
+			errorMessage: assistant?.errorMessage,
+			assistantPreview: contentToText(content).trim().slice(0, 500),
+			toolCallCount: contentParts.filter((part) => part.type === "toolCall").length,
+			toolResultCount: messages.filter((message) => message.role === "toolResult").length,
+		});
 	}
 }

@@ -122,7 +122,7 @@ function createContext(entries: TestEntry[] = [rootUserEntry("root")], initialLe
 function createHarness(
 	maxIterations = 10,
 	createResetCheckpoint?: (ctx: LoopCommandContextLike, prompt: string) => string | undefined,
-	sendUserMessage?: (prompt: string, sentPrompts: string[]) => void,
+	sendUserMessage?: (prompt: string, sentPrompts: string[]) => Promise<void> | void,
 ) {
 	const sentPrompts: string[] = [];
 	const scheduled: Array<() => Promise<void> | void> = [];
@@ -131,8 +131,7 @@ function createHarness(
 		createResetCheckpoint,
 		sendUserMessage(prompt: string) {
 			if (sendUserMessage) {
-				sendUserMessage(prompt, sentPrompts);
-				return;
+				return sendUserMessage(prompt, sentPrompts);
 			}
 			sentPrompts.push(prompt);
 		},
@@ -604,4 +603,51 @@ test("the loop stops and notifies when starting an iteration fails", async () =>
 	assert.equal(controller.getState().active, false);
 	assert.ok(ctx.actions.includes("status:ralph-loop:"));
 	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not start iteration: agent busy"));
+});
+
+test("the loop stops and notifies when starting an iteration rejects asynchronously", async () => {
+	const { controller, sentPrompts } = createHarness(10, undefined, () => {
+		return Promise.reject(new Error("agent busy async"));
+	});
+	const ctx = createContext();
+
+	await controller.handleCommand("cannot send async", ctx);
+
+	assert.deepEqual(sentPrompts, []);
+	assert.equal(controller.getState().active, false);
+	assert.ok(ctx.actions.includes("status:ralph-loop:"));
+	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not start iteration: agent busy async"));
+});
+
+test("the controller emits diagnostic events for loop lifecycle decisions", async () => {
+	const debugEvents: Array<{ event: string; stopReason?: string }> = [];
+	const { controller, scheduled } = createHarness(1);
+	const ctx = createContext([rootUserEntry("root"), assistantEntry("assistant", "root")], "root");
+	controller.setDebugLogger((event) => debugEvents.push(event));
+
+	await controller.handleCommand("diagnose me", ctx);
+	controller.handleAgentEnd({
+		messages: [
+			{
+				role: "assistant",
+				stopReason: "stop",
+				content: [{ type: "text", text: "done" }],
+			},
+		],
+	});
+	await runNextScheduled(scheduled);
+
+	assert.deepEqual(
+		debugEvents.map((event) => event.event),
+		[
+			"loop_start",
+			"iteration_send_start",
+			"iteration_send_succeeded",
+			"agent_end",
+			"continuation_scheduled",
+			"continuation_start",
+			"loop_stop",
+		],
+	);
+	assert.equal(debugEvents.find((event) => event.event === "agent_end")?.stopReason, "stop");
 });
