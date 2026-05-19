@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- Prevented unused Ralph Loop sessions from creating `.pi/ralph-loop-debug.jsonl` before `/loop` has started.
+
 ## v0.1.2
 
 ### Added
