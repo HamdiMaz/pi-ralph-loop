@@ -619,6 +619,16 @@ test("the loop stops and notifies when starting an iteration rejects asynchronou
 	assert.ok(ctx.actions.includes("notify:error:Ralph Loop stopped: could not start iteration: agent busy async"));
 });
 
+test("inactive shutdown does not emit diagnostic events", () => {
+	const debugEvents: string[] = [];
+	const { controller } = createHarness();
+	controller.setDebugLogger((event) => debugEvents.push(event.event));
+
+	controller.shutdown();
+
+	assert.deepEqual(debugEvents, []);
+});
+
 test("the controller emits diagnostic events for loop lifecycle decisions", async () => {
 	const debugEvents: Array<{ event: string; stopReason?: string }> = [];
 	const { controller, scheduled } = createHarness(1);

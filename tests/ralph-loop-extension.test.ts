@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -201,6 +201,27 @@ test("/loop writes diagnostic events to the project log file", async () => {
 			["loop_start", "iteration_send_start", "iteration_send_succeeded"],
 		);
 		assert.equal(events[0]?.prompt, "ship it");
+	} finally {
+		await rm(cwd, { recursive: true, force: true });
+	}
+});
+
+test("unused sessions do not create a diagnostic log file", async () => {
+	const cwd = await mkdtemp(join(tmpdir(), "ralph-loop-unused-test-"));
+	try {
+		const { pi, handlers } = createPiHarness();
+		registerRalphLoop(pi as never);
+		const sessionStartHandler = handlers.get("session_start")?.[0];
+		const sessionShutdownHandler = handlers.get("session_shutdown")?.[0];
+		assert.ok(sessionStartHandler);
+		assert.ok(sessionShutdownHandler);
+
+		const ctx = createCommandContext({ cwd });
+		sessionStartHandler({}, ctx);
+		sessionShutdownHandler({}, ctx);
+
+		await assert.rejects(access(join(cwd, ".pi", "ralph-loop-debug.jsonl")), { code: "ENOENT" });
+		await assert.rejects(access(join(cwd, ".pi")), { code: "ENOENT" });
 	} finally {
 		await rm(cwd, { recursive: true, force: true });
 	}

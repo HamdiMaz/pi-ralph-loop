@@ -249,6 +249,10 @@ export class RalphLoopController {
 	}
 
 	shutdown(): void {
+		if (!this.state.active) {
+			return;
+		}
+
 		this.stop(undefined, "info");
 	}
 
@@ -382,7 +386,10 @@ export class RalphLoopController {
 
 	private stop(message: string | undefined, type: NotifyType): void {
 		const ctx = this.context;
-		this.emitDebug({ event: "loop_stop", message, notifyType: type });
+		const wasActive = this.state.active;
+		if (wasActive) {
+			this.emitDebug({ event: "loop_stop", message, notifyType: type });
+		}
 		this.state = this.createInactiveState();
 		this.continuationScheduled = false;
 		this.resetTarget = undefined;
